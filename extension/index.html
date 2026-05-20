@@ -122,6 +122,19 @@
 </div><!-- end .container -->
 
 <!-- ================================================================
+     CONFIRM MODAL — for dangerous operations (close all tabs, etc.)
+     ================================================================ -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-dialog">
+    <p class="confirm-msg" id="confirmMsg"></p>
+    <div class="confirm-actions">
+      <button class="confirm-btn confirm-cancel" id="confirmCancel">Cancel</button>
+      <button class="confirm-btn confirm-danger" id="confirmOk">Close All</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
      TOAST — floats above everything, used for action confirmations
      Hidden by default via CSS (opacity:0, translateY)
      ================================================================ -->
