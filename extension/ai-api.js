@@ -83,11 +83,15 @@ async function fetchGroupingSuggestions(tabs, settings, externalSignal, existing
   }
 }
 
-async function fetchTabSearch(query, tabs, settings, externalSignal) {
+async function fetchTabSearch(query, tabs, historyItems, settings, externalSignal) {
   const startTime = Date.now();
+  const allItems = [];
+  tabs.forEach((t, i) => allItems.push(`${allItems.length + 1}. [OPEN] ${t.title} - ${t.url}`));
+  historyItems.forEach((h, i) => allItems.push(`${allItems.length + 1}. [HISTORY] ${h.title} - ${h.url}`));
+
   const messages = [
-    { role: 'system', content: 'You find browser tabs matching a user description. Return ONLY valid JSON, no markdown.' },
-    { role: 'user', content: `Tabs:\n${tabs.map((t, i) => `${i + 1}. ${t.title} - ${t.url}`).join('\n')}\n\nFind tabs matching: "${query}"\nReturn: {"matches": [1, 5, 12]}  (tab indices that match)` }
+    { role: 'system', content: 'You find browser tabs/pages matching a user description. Rank by relevance. Return ONLY valid JSON, no markdown.' },
+    { role: 'user', content: `Items:\n${allItems.join('\n')}\n\nFind items matching: "${query}"\nReturn: {"matches": [3, 1, 7]}  (indices ranked by relevance, best first)` }
   ];
 
   try {
@@ -112,20 +116,23 @@ async function fetchTabSearch(query, tabs, settings, externalSignal) {
 
     if (!response.ok) {
       window.__aiDebug.push({ timestamp: Date.now(), type: 'search', query, prompt: messages, response: `HTTP ${response.status}`, parsed: null, duration: Date.now() - startTime });
-      return [];
+      return { openMatches: [], historyMatches: [] };
     }
     const data = await response.json();
     const content = data.choices[0].message.content;
     const parsed = JSON.parse(content.replace(/```json\s*|```\s*/g, '').trim());
     if (!Array.isArray(parsed.matches)) {
       window.__aiDebug.push({ timestamp: Date.now(), type: 'search', query, prompt: messages, response: content, parsed: null, duration: Date.now() - startTime });
-      return [];
+      return { openMatches: [], historyMatches: [] };
     }
-    const result = parsed.matches.filter(i => typeof i === 'number' && i >= 1 && i <= tabs.length);
-    window.__aiDebug.push({ timestamp: Date.now(), type: 'search', query, prompt: messages, response: content, parsed: result, duration: Date.now() - startTime });
-    return result;
+    const valid = parsed.matches.filter(i => typeof i === 'number' && i >= 1 && i <= allItems.length);
+    const openCount = tabs.length;
+    const openMatches = valid.filter(i => i <= openCount);
+    const historyMatches = valid.filter(i => i > openCount).map(i => i - openCount);
+    window.__aiDebug.push({ timestamp: Date.now(), type: 'search', query, prompt: messages, response: content, parsed: { openMatches, historyMatches }, duration: Date.now() - startTime });
+    return { openMatches, historyMatches };
   } catch (e) {
     window.__aiDebug.push({ timestamp: Date.now(), type: 'search', query, prompt: messages, response: e.message, parsed: null, duration: Date.now() - startTime });
-    return [];
+    return { openMatches: [], historyMatches: [] };
   }
 }

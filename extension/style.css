@@ -1457,6 +1457,57 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
   transition: opacity 0.3s;
 }
 
+/* History search results */
+.history-results-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(154, 145, 138, 0.15);
+}
+
+.history-results-header {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.history-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(154, 145, 138, 0.1);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.history-result-item:last-child {
+  border-bottom: none;
+}
+
+.history-result-item:hover {
+  background: rgba(90, 122, 98, 0.06);
+}
+
+.history-result-title {
+  font-size: 13px;
+  color: var(--ink);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-result-host {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
 /* AI Debug Panel */
 .ai-debug-panel {
   position: fixed;
@@ -1656,4 +1707,41 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
 .confirm-danger:hover {
   background: #9a4444;
   border-color: #9a4444;
+}
+
+/* ─── Frequent Sites (Prediction) ─────────────────────────────── */
+.frequent-section {
+  grid-column: 1 / -1;
+  margin-bottom: 24px;
+}
+.frequent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.freq-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--warm-gray);
+  border-radius: 20px;
+  text-decoration: none;
+  color: var(--ink);
+  font-size: 13px;
+  transition: border-color .15s, box-shadow .15s;
+  cursor: pointer;
+}
+.freq-chip:hover {
+  border-color: var(--accent-amber);
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.freq-favicon {
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.freq-label {
+  white-space: nowrap;
 }

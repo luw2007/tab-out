@@ -1365,8 +1365,52 @@ async function renderStaticDashboard() {
   await renderDeferredColumn();
 }
 
+async function renderFrequentSites() {
+  const { frequentSites } = await chrome.storage.local.get('frequentSites');
+  const container = document.getElementById('frequentSitesSection');
+  if (!container) return;
+  if (!frequentSites || frequentSites.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'block';
+  const listEl = document.getElementById('frequentSitesList');
+  listEl.innerHTML = frequentSites.map(s => {
+    const favicon = `https://www.google.com/s2/favicons?domain=${s.hostname}&sz=32`;
+    const label = s.title.length > 24 ? s.title.slice(0, 22) + '…' : s.title;
+    return `<a class="freq-chip" href="${s.url}" data-freq-url="${s.url}" title="${s.title}">
+      <img class="freq-favicon" src="${favicon}" width="16" height="16" alt="">
+      <span class="freq-label">${label}</span>
+    </a>`;
+  }).join('');
+}
+
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.freq-chip');
+  if (!chip) return;
+  e.preventDefault();
+  const url = chip.dataset.freqUrl;
+  focusOrOpen(url);
+});
+
+async function focusOrOpen(url) {
+  const allTabs = await chrome.tabs.query({});
+  let hostname;
+  try { hostname = new URL(url).hostname; } catch { return; }
+  const match = allTabs.find(t => {
+    try { return new URL(t.url).hostname === hostname; } catch { return false; }
+  });
+  if (match) {
+    await chrome.tabs.update(match.id, { active: true });
+    await chrome.windows.update(match.windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url });
+  }
+}
+
 async function renderDashboard() {
   await renderStaticDashboard();
+  await renderFrequentSites();
   if (!skipNextAiCall) triggerAiSuggestions();
   skipNextAiCall = false;
 }
@@ -1524,7 +1568,7 @@ async function triggerAiOnly(mode) {
 let searchAbortController = null;
 
 async function searchTabsWithAi(query) {
-  if (!query || query.trim().length < 2) { clearSearchHighlights(); return; }
+  if (!query || query.trim().length < 2) { clearSearchHighlights(); clearHistoryResults(); return; }
 
   const settings = await new Promise(resolve =>
     chrome.storage.local.get('ai_settings', r => resolve(r.ai_settings))
@@ -1540,16 +1584,28 @@ async function searchTabsWithAi(query) {
   const searchArea = document.getElementById('aiSearchStatus');
   if (searchArea) searchArea.textContent = '搜索中...';
 
-  const matches = await fetchTabSearch(query, tabData, settings, searchAbortController.signal);
+  const openUrls = new Set(realTabs.map(t => t.url));
+  let historyData = [];
+  try {
+    const historyRaw = await chrome.history.search({ text: query, maxResults: 30 });
+    const historyDeduped = (historyRaw || []).filter(h => h.url && !openUrls.has(h.url));
+    historyData = historyDeduped.slice(0, 20).map(h => ({ title: h.title || h.url, url: h.url }));
+  } catch (e) {
+    console.warn('[Tab Out] chrome.history.search failed:', e);
+  }
+
+  const { openMatches, historyMatches } = await fetchTabSearch(query, tabData, historyData, settings, searchAbortController.signal);
   if (searchArea) searchArea.textContent = '';
 
-  if (matches.length === 0) {
+  if (openMatches.length === 0 && historyMatches.length === 0) {
     if (searchArea) searchArea.textContent = '未找到匹配';
     setTimeout(() => { if (searchArea) searchArea.textContent = ''; }, 2000);
+    clearHistoryResults();
     return;
   }
 
-  highlightMatchedTabs(matches, realTabs);
+  highlightMatchedTabs(openMatches, realTabs);
+  renderHistoryResults(historyMatches, historyData);
   if (settings && settings.debug) renderDebugPanel();
 }
 
@@ -1569,6 +1625,43 @@ function highlightMatchedTabs(indices, realTabs) {
 function clearSearchHighlights() {
   document.querySelectorAll('.tab-highlighted').forEach(el => el.classList.remove('tab-highlighted'));
   document.querySelectorAll('.tab-dimmed').forEach(el => el.classList.remove('tab-dimmed'));
+}
+
+function renderHistoryResults(indices, historyData) {
+  clearHistoryResults();
+  if (!indices || indices.length === 0) return;
+
+  const items = indices
+    .map(i => historyData[i - 1])
+    .filter(Boolean)
+    .map(h => {
+      const hostname = new URL(h.url).hostname.replace('www.', '');
+      return `<div class="history-result-item" data-url="${h.url.replace(/"/g, '&quot;')}">
+        <img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=${hostname}&sz=32" alt="">
+        <span class="history-result-title">${h.title || hostname}</span>
+        <span class="history-result-host">${hostname}</span>
+      </div>`;
+    }).join('');
+
+  const html = `<div class="history-results-section" id="historyResultsSection">
+    <div class="history-results-header">History</div>
+    ${items}
+  </div>`;
+
+  const openSection = document.getElementById('openTabsSection');
+  if (openSection) {
+    openSection.insertAdjacentHTML('afterend', html);
+  }
+
+  document.getElementById('historyResultsSection').addEventListener('click', (e) => {
+    const item = e.target.closest('.history-result-item');
+    if (item) chrome.tabs.create({ url: item.dataset.url });
+  });
+}
+
+function clearHistoryResults() {
+  const el = document.getElementById('historyResultsSection');
+  if (el) el.remove();
 }
 
 
@@ -1997,7 +2090,7 @@ document.addEventListener('input', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.target.id !== 'aiSearchInput') return;
   if (e.key === 'Enter') { clearTimeout(e.target._debounce); searchTabsWithAi(e.target.value); }
-  if (e.key === 'Escape') { e.target.value = ''; clearSearchHighlights(); }
+  if (e.key === 'Escape') { e.target.value = ''; clearSearchHighlights(); clearHistoryResults(); }
 });
 
 renderDashboard();

@@ -113,6 +113,88 @@ chrome.tabs.onUpdated.addListener(() => {
   updateBadge();
 });
 
+// ─── Frequent Sites Prediction ───────────────────────────────────────────────
+
+const PREDICTION_ALARM = 'compute-frequent-sites';
+const PREDICTION_WINDOW_MS = 48 * 60 * 60 * 1000; // 48 hours
+const PREDICTION_INTERVAL_MIN = 180; // 3 hours
+const PREDICTION_TOP_N = 8;
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === PREDICTION_ALARM) computeFrequentSites();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(PREDICTION_ALARM, { periodInMinutes: PREDICTION_INTERVAL_MIN });
+  computeFrequentSites();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create(PREDICTION_ALARM, { periodInMinutes: PREDICTION_INTERVAL_MIN });
+  computeFrequentSites();
+});
+
+async function computeFrequentSites() {
+  try {
+    const now = Date.now();
+    const since = now - PREDICTION_WINDOW_MS;
+    const hour = new Date().getHours();
+    const currentSlot = Math.floor(hour / 3); // 0-7, 8 slots per day
+
+    const items = await chrome.history.search({
+      text: '',
+      startTime: since,
+      endTime: now,
+      maxResults: 5000,
+    });
+
+    // Score by visit count weighted by time-slot match
+    const siteScores = {};
+    for (const item of items) {
+      if (!item.url || item.url.startsWith('chrome://') || item.url.startsWith('chrome-extension://')) continue;
+      let hostname;
+      try { hostname = new URL(item.url).hostname; } catch { continue; }
+      if (!hostname) continue;
+
+      const visitSlot = item.lastVisitTime ? Math.floor(new Date(item.lastVisitTime).getHours() / 3) : -1;
+      const slotBonus = visitSlot === currentSlot ? 2.0 : 1.0;
+      const visitCount = item.visitCount || 1;
+
+      if (!siteScores[hostname]) siteScores[hostname] = { hostname, score: 0, url: item.url, title: item.title };
+      siteScores[hostname].score += visitCount * slotBonus;
+      // Keep the most-visited URL for this hostname
+      if (visitCount > (siteScores[hostname]._maxVisits || 0)) {
+        siteScores[hostname]._maxVisits = visitCount;
+        siteScores[hostname].url = item.url;
+        siteScores[hostname].title = item.title;
+      }
+    }
+
+    // Filter out currently open tabs
+    const openTabs = await chrome.tabs.query({});
+    const openHostnames = new Set();
+    for (const t of openTabs) {
+      try {
+        const u = extractSuspendedUrl(t.url) || t.url;
+        if (u) openHostnames.add(new URL(u).hostname);
+      } catch {}
+    }
+
+    const candidates = Object.values(siteScores)
+      .filter(s => !openHostnames.has(s.hostname))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, PREDICTION_TOP_N)
+      .map(s => ({ hostname: s.hostname, url: s.url, title: s.title || s.hostname, score: s.score }));
+
+    await chrome.storage.local.set({
+      frequentSites: candidates,
+      frequentSitesUpdatedAt: now,
+    });
+  } catch (e) {
+    // Silently fail — non-critical feature
+  }
+}
+
 // ─── Initial run ─────────────────────────────────────────────────────────────
 
 // Run once immediately when the service worker first loads
