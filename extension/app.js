@@ -26,6 +26,30 @@
 // All open tabs — populated by fetchOpenTabs()
 let openTabs = [];
 
+// Bookmarked URLs cache — loaded once, refreshed on bookmark changes
+let bookmarkUrlSet = new Set();
+
+async function loadBookmarks(forceRefresh = false) {
+  if (!forceRefresh) {
+    const { bookmarkUrlCache } = await chrome.storage.local.get('bookmarkUrlCache');
+    if (bookmarkUrlCache) { bookmarkUrlSet = new Set(bookmarkUrlCache); return; }
+  }
+  const tree = await chrome.bookmarks.getTree();
+  const urls = [];
+  (function walk(nodes) {
+    for (const n of nodes) {
+      if (n.url) urls.push(n.url);
+      if (n.children) walk(n.children);
+    }
+  })(tree);
+  bookmarkUrlSet = new Set(urls);
+  await chrome.storage.local.set({ bookmarkUrlCache: urls });
+}
+
+chrome.bookmarks.onCreated.addListener(() => loadBookmarks(true));
+chrome.bookmarks.onRemoved.addListener(() => loadBookmarks(true));
+chrome.bookmarks.onChanged.addListener(() => loadBookmarks(true));
+
 function extractSuspendedUrl(url) {
   if (!url || !url.startsWith('chrome-extension://')) return null;
   try {
@@ -458,6 +482,26 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove('visible'), 2500);
 }
 
+function showConfirm(message) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('confirmOverlay');
+    document.getElementById('confirmMsg').textContent = message;
+    overlay.classList.add('visible');
+    const cleanup = (result) => {
+      overlay.classList.remove('visible');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const okBtn = document.getElementById('confirmOk');
+    const cancelBtn = document.getElementById('confirmCancel');
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
 /**
  * checkAndShowEmptyState()
  *
@@ -886,7 +930,7 @@ function buildOverflowChips(hiddenTabs, urlCounts = {}) {
     const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
       ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
-      <span class="chip-text">${label}</span>${dupeTag}
+      ${bookmarkUrlSet.has(tab.url) ? '<span class="chip-bookmark">⭐</span>' : ''}<span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
@@ -967,7 +1011,7 @@ function renderDomainCard(group) {
     const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
       ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
-      <span class="chip-text">${label}</span>${dupeTag}
+      ${bookmarkUrlSet.has(tab.url) ? '<span class="chip-bookmark">⭐</span>' : ''}<span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
@@ -1144,6 +1188,7 @@ async function renderStaticDashboard() {
 
   // --- Fetch tabs ---
   await fetchOpenTabs();
+  await loadBookmarks();
   const realTabs = getRealTabs();
 
   // --- Group tabs by domain ---
@@ -1851,6 +1896,8 @@ document.addEventListener('click', async (e) => {
         banner.remove();
         pendingCloseSuggestions.shift();
         renderNextCloseBanner();
+        skipNextAiCall = true;
+        renderDashboard();
       }, 300);
       showToast(`已关闭 ${urlsToClose.length} 个标签`);
     }
@@ -1876,6 +1923,9 @@ document.addEventListener('click', async (e) => {
     const allUrls = openTabs
       .filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'))
       .map(t => t.url);
+    const count = allUrls.length;
+    const confirmed = await showConfirm(`This will close all ${count} tab${count !== 1 ? 's' : ''}. Are you sure?`);
+    if (!confirmed) return;
     await closeTabsByUrls(allUrls);
     playCloseSound();
 
