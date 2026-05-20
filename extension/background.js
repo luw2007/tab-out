@@ -21,13 +21,39 @@
  * Counts open real-web tabs and updates the extension's toolbar badge.
  * "Real" tabs = not chrome://, not extension pages, not about:blank.
  */
+/**
+ * extractSuspendedUrl(url)
+ *
+ * Detects tabs suspended by Tab Suspender extensions and extracts the original URL.
+ */
+function extractSuspendedUrl(url) {
+  if (!url || !url.startsWith('chrome-extension://')) return null;
+  try {
+    const parsed = new URL(url);
+    for (const key of ['url', 'uri']) {
+      const val = parsed.searchParams.get(key);
+      if (val && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('file://'))) return val;
+    }
+    const hash = parsed.hash.slice(1);
+    if (hash) {
+      const params = new URLSearchParams(hash);
+      for (const key of ['uri', 'url']) {
+        const val = params.get(key);
+        if (val && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('file://'))) return val;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 async function updateBadge() {
   try {
     const tabs = await chrome.tabs.query({});
 
-    // Only count actual web pages — skip browser internals and extension pages
     const count = tabs.filter(t => {
       const url = t.url || '';
+      // Suspended tabs count as real tabs
+      if (extractSuspendedUrl(url)) return true;
       return (
         !url.startsWith('chrome://') &&
         !url.startsWith('chrome-extension://') &&
