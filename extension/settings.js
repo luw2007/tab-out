@@ -29,6 +29,10 @@ function openSettings() {
       <label class="settings-debug-label"><input type="checkbox" id="settingsDebug"> Debug Mode</label>
       <label class="settings-debug-label"><input type="checkbox" id="settingsMetaDesc"> Include Meta Description</label>
       <button class="settings-test-ai" id="settingsTestAiBtn">Test AI</button>
+      <div class="settings-blacklist-section" id="settingsBlacklistSection">
+        <label>已屏蔽的网站（不再出现在 Might open next）</label>
+        <div class="blacklist-list" id="settingsBlacklistList"></div>
+      </div>
     </div>
   `;
 
@@ -39,6 +43,17 @@ function openSettings() {
     closeSettings();
     if (typeof triggerAiSuggestions === 'function') triggerAiSuggestions();
     setTimeout(() => { if (typeof renderDebugPanel === 'function') renderDebugPanel(); }, 500);
+  });
+  overlay.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action="unblock-freq"]');
+    if (!btn) return;
+    const host = btn.dataset.host;
+    const { frequentBlacklist = [] } = await chrome.storage.local.get('frequentBlacklist');
+    const updated = frequentBlacklist.filter(h => h !== host);
+    await chrome.storage.local.set({ frequentBlacklist: updated });
+    renderBlacklist();
+    if (typeof renderFrequentSites === 'function') renderFrequentSites();
+    if (typeof showToast === 'function') showToast(`已恢复 ${host}`);
   });
   loadSettings();
 }
@@ -74,6 +89,21 @@ function loadSettings() {
     const metaDescEl = document.getElementById('settingsMetaDesc');
     if (metaDescEl) metaDescEl.checked = !!s.metaDesc;
   });
+  renderBlacklist();
+}
+
+async function renderBlacklist() {
+  const listEl = document.getElementById('settingsBlacklistList');
+  if (!listEl) return;
+  const { frequentBlacklist = [] } = await chrome.storage.local.get('frequentBlacklist');
+  if (frequentBlacklist.length === 0) {
+    listEl.innerHTML = '<div class="blacklist-empty">暂无屏蔽项</div>';
+    return;
+  }
+  listEl.innerHTML = frequentBlacklist.map(host => `<div class="blacklist-item">
+    <span class="blacklist-host">${host}</span>
+    <button class="blacklist-remove" data-action="unblock-freq" data-host="${host}" title="恢复显示">×</button>
+  </div>`).join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

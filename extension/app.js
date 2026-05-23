@@ -1366,26 +1366,52 @@ async function renderStaticDashboard() {
 }
 
 async function renderFrequentSites() {
-  const { frequentSites } = await chrome.storage.local.get('frequentSites');
+  const { frequentSites, frequentBlacklist = [] } = await chrome.storage.local.get(['frequentSites', 'frequentBlacklist']);
   const container = document.getElementById('frequentSitesSection');
   if (!container) return;
   if (!frequentSites || frequentSites.length === 0) {
     container.style.display = 'none';
     return;
   }
+  const blacklistSet = new Set(frequentBlacklist);
+  const visible = frequentSites.filter(s => !blacklistSet.has(s.hostname));
+  if (visible.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
   container.style.display = 'block';
   const listEl = document.getElementById('frequentSitesList');
-  listEl.innerHTML = frequentSites.map(s => {
+  listEl.innerHTML = visible.map(s => {
     const favicon = `https://www.google.com/s2/favicons?domain=${s.hostname}&sz=32`;
     const label = s.title.length > 24 ? s.title.slice(0, 22) + '…' : s.title;
-    return `<a class="freq-chip" href="${s.url}" data-freq-url="${s.url}" title="${s.title}">
+    return `<a class="freq-chip" href="${s.url}" data-freq-url="${s.url}" data-freq-host="${s.hostname}" title="${s.title}">
       <img class="freq-favicon" src="${favicon}" width="16" height="16" alt="">
       <span class="freq-label">${label}</span>
+      <button class="freq-dismiss" data-action="dismiss-freq" title="不再显示">×</button>
     </a>`;
   }).join('');
 }
 
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
+  if (e.target.closest('[data-action="dismiss-freq"]')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const chip = e.target.closest('.freq-chip');
+    if (!chip) return;
+    const host = chip.dataset.freqHost;
+    if (!host) return;
+    const { frequentBlacklist = [] } = await chrome.storage.local.get('frequentBlacklist');
+    if (!frequentBlacklist.includes(host)) {
+      frequentBlacklist.push(host);
+      await chrome.storage.local.set({ frequentBlacklist });
+    }
+    chip.style.transition = 'opacity 0.2s, transform 0.2s';
+    chip.style.opacity = '0';
+    chip.style.transform = 'scale(0.9)';
+    setTimeout(() => { chip.remove(); renderFrequentSites(); }, 200);
+    if (typeof showToast === 'function') showToast(`已屏蔽 ${host}`);
+    return;
+  }
   const chip = e.target.closest('.freq-chip');
   if (!chip) return;
   e.preventDefault();
@@ -1588,7 +1614,11 @@ async function searchTabsWithAi(query) {
   let historyData = [];
   try {
     const historyRaw = await chrome.history.search({ text: query, maxResults: 30 });
-    const historyDeduped = (historyRaw || []).filter(h => h.url && !openUrls.has(h.url));
+    const historyDeduped = (historyRaw || []).filter(h => {
+      if (!h.url) return false;
+      if (h.url.startsWith('chrome-extension://') || h.url.startsWith('chrome://')) return false;
+      return !openUrls.has(h.url);
+    });
     historyData = historyDeduped.slice(0, 20).map(h => ({ title: h.title || h.url, url: h.url }));
   } catch (e) {
     console.warn('[Tab Out] chrome.history.search failed:', e);
@@ -1644,13 +1674,13 @@ function renderHistoryResults(indices, historyData) {
     }).join('');
 
   const html = `<div class="history-results-section" id="historyResultsSection">
-    <div class="history-results-header">History</div>
+    <div class="section-header"><h2>History</h2><div class="section-line"></div></div>
     ${items}
   </div>`;
 
-  const openSection = document.getElementById('openTabsSection');
-  if (openSection) {
-    openSection.insertAdjacentHTML('afterend', html);
+  const topRow = document.getElementById('topRow');
+  if (topRow) {
+    topRow.insertAdjacentHTML('beforeend', html);
   }
 
   document.getElementById('historyResultsSection').addEventListener('click', (e) => {
